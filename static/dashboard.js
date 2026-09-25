@@ -349,9 +349,19 @@ import { fmtTime, shortId } from "/dashboard/format.js";
       el(
         "div",
         "delivery-meta",
-        "attempt " + d.attempts + " · last " + fmtTime(d.last_attempt)
+        "attempt " + d.attempts + " · manual " + (d.manual_attempts || 0)
       )
     );
+    li.appendChild(el("div", "delivery-meta", "last: " + relativeTime(d.last_attempt)));
+    li.lastChild.title = fmtTime(d.last_attempt);
+    li.appendChild(el("div", "delivery-meta", "created: " + relativeTime(d.created_at)));
+    li.lastChild.title = fmtTime(d.created_at);
+    if (d.status === "failed") {
+      li.appendChild(el("div", "error", "Last delivery failed; check receiver logs or redeliver."));
+    }
+    if (d.status !== "delivered") {
+      li.appendChild(el("div", "delivery-meta", "retry state: queued for redrive if attempts remain"));
+    }
 
     var button = el("button", "ghost", "Redeliver");
     button.addEventListener("click", function () {
