@@ -614,15 +614,7 @@ pub async fn list_webhooks(
 
     Ok(Json(json!({
         "payment_id": payment.id,
-        "deliveries": deliveries.iter().map(|d| json!({
-            "id": d.id,
-            "url": d.url,
-            "event": d.event(),
-            "status": d.status,
-            "attempts": d.attempts,
-            "last_attempt": d.last_attempt,
-            "created_at": d.created_at,
-        })).collect::<Vec<_>>(),
+        "deliveries": deliveries.iter().map(delivery_to_json).collect::<Vec<_>>(),
     })))
 }
 

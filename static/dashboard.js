@@ -64,8 +64,32 @@
     return isNaN(d.getTime()) ? iso : d.toLocaleString();
   }
 
+  function relativeTime(iso) {
+    if (!iso) return "never";
+    var d = new Date(iso);
+    var seconds = Math.round((Date.now() - d.getTime()) / 1000);
+    if (!isFinite(seconds)) return iso;
+    if (seconds < 60) return seconds + "s ago";
+    if (seconds < 3600) return Math.round(seconds / 60) + "m ago";
+    if (seconds < 86400) return Math.round(seconds / 3600) + "h ago";
+    return Math.round(seconds / 86400) + "d ago";
+  }
+
   function shortId(id) {
     return typeof id === "string" && id.length > 12 ? id.slice(0, 8) + "…" : id;
+  }
+
+  function copyButton(value) {
+    var button = el("button", "copy", "Copy");
+    button.addEventListener("click", function () {
+      navigator.clipboard.writeText(value).then(function () {
+        button.textContent = "Copied";
+        window.setTimeout(function () {
+          button.textContent = "Copy";
+        }, 1200);
+      });
+    });
+    return button;
   }
 
   /** Map a payment or delivery status onto a pill style. */
@@ -281,6 +305,11 @@
             var dd = document.createElement("dd");
             dd.appendChild(el("span", pillClass(p.status), p.status));
             fields.appendChild(dd);
+          } else if (pair[0] === "Memo" || pair[0] === "Destination" || pair[0] === "Payment ID") {
+            var value = document.createElement("dd");
+            value.appendChild(el("span", "mono", pair[1]));
+            value.appendChild(copyButton(pair[1]));
+            fields.appendChild(value);
           } else {
             fields.appendChild(el("dd", "mono", pair[1]));
           }
@@ -326,9 +355,19 @@
       el(
         "div",
         "delivery-meta",
-        "attempt " + d.attempts + " · last " + fmtTime(d.last_attempt)
+        "attempt " + d.attempts + " · manual " + (d.manual_attempts || 0)
       )
     );
+    li.appendChild(el("div", "delivery-meta", "last: " + relativeTime(d.last_attempt)));
+    li.lastChild.title = fmtTime(d.last_attempt);
+    li.appendChild(el("div", "delivery-meta", "created: " + relativeTime(d.created_at)));
+    li.lastChild.title = fmtTime(d.created_at);
+    if (d.status === "failed") {
+      li.appendChild(el("div", "error", "Last delivery failed; check receiver logs or redeliver."));
+    }
+    if (d.status !== "delivered") {
+      li.appendChild(el("div", "delivery-meta", "retry state: queued for redrive if attempts remain"));
+    }
 
     var button = el("button", "ghost", "Redeliver");
     button.addEventListener("click", function () {
