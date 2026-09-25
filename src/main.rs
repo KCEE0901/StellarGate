@@ -8,14 +8,13 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use stellargate::{
-    api,
+    AppState, TaskHealth, api,
     config::{Config, ListenerMode},
     db, expiry, horizon,
     metrics::{
-        AuthMetrics, HorizonMetrics, HttpMetrics, PaymentMetrics, TrustlineMetrics,
-        WebhookMetrics,
+        AuthMetrics, HorizonMetrics, HttpMetrics, PaymentMetrics, TrustlineMetrics, WebhookMetrics,
     },
-    retention, webhook, AppState, TaskHealth,
+    retention, webhook,
 };
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
@@ -181,11 +180,11 @@ where
 /// Await a background task. A `JoinError` means it panicked, which is recorded
 /// so the failure counter — and any alert watching it — fires.
 async fn join_task(handle: JoinHandle<()>, name: &'static str, health: &TaskHealth) {
-    if let Err(e) = handle.await {
-        if e.is_panic() {
-            warn!("background task panicked");
-            health.task_failed(name);
-        }
+    if let Err(e) = handle.await
+        && e.is_panic()
+    {
+        warn!("background task panicked");
+        health.task_failed(name);
     }
 }
 

@@ -653,50 +653,49 @@ pub async fn list_payments(
     pool: &Db,
     merchant_id: &str,
     status: Option<&str>,
+    created_after: Option<&str>,
+    created_before: Option<&str>,
     limit: i64,
     offset: i64,
 ) -> Result<(Vec<Payment>, i64)> {
-    let (rows, total) = if let Some(s) = status {
-        let rows = sqlx::query(
-            "SELECT id, merchant_id, destination_address, memo, amount, asset, asset_issuer, status,
-                    webhook_url, tx_hash, paid_amount, created_at, updated_at, expires_at
-             FROM payments WHERE merchant_id = ? AND status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-        )
-        .bind(merchant_id)
-        .bind(s)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool)
-        .await?;
+    let rows = sqlx::query(
+        "SELECT id, merchant_id, destination_address, memo, amount, asset, asset_issuer, status,
+                webhook_url, tx_hash, paid_amount, created_at, updated_at, expires_at
+         FROM payments
+         WHERE merchant_id = ?
+           AND (? IS NULL OR status = ?)
+           AND (? IS NULL OR created_at >= ?)
+           AND (? IS NULL OR created_at <= ?)
+         ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?",
+    )
+    .bind(merchant_id)
+    .bind(status)
+    .bind(status)
+    .bind(created_after)
+    .bind(created_after)
+    .bind(created_before)
+    .bind(created_before)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await?;
 
-        let total: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM payments WHERE merchant_id = ? AND status = ?",
-        )
-        .bind(merchant_id)
-        .bind(s)
-        .fetch_one(pool)
-        .await?;
-
-        (rows, total)
-    } else {
-        let rows = sqlx::query(
-            "SELECT id, merchant_id, destination_address, memo, amount, asset, asset_issuer, status,
-                    webhook_url, tx_hash, paid_amount, created_at, updated_at, expires_at
-             FROM payments WHERE merchant_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
-        )
-        .bind(merchant_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool)
-        .await?;
-
-        let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM payments WHERE merchant_id = ?")
-            .bind(merchant_id)
-            .fetch_one(pool)
-            .await?;
-
-        (rows, total)
-    };
+    let total: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM payments
+         WHERE merchant_id = ?
+           AND (? IS NULL OR status = ?)
+           AND (? IS NULL OR created_at >= ?)
+           AND (? IS NULL OR created_at <= ?)",
+    )
+    .bind(merchant_id)
+    .bind(status)
+    .bind(status)
+    .bind(created_after)
+    .bind(created_after)
+    .bind(created_before)
+    .bind(created_before)
+    .fetch_one(pool)
+    .await?;
 
     Ok((rows.iter().map(row_to_payment).collect(), total))
 }
@@ -705,72 +704,50 @@ pub async fn list_payments_keyset(
     pool: &Db,
     merchant_id: &str,
     status: Option<&str>,
+    created_after: Option<&str>,
+    created_before: Option<&str>,
     limit: i64,
     cursor: Option<(&str, &str)>,
 ) -> Result<Vec<Payment>> {
-    let rows = match (status, cursor) {
-        (None, None) => {
-            sqlx::query(
-                "SELECT id, merchant_id, destination_address, memo, amount, asset, asset_issuer, status,
-                    webhook_url, tx_hash, paid_amount, created_at, updated_at, expires_at
-             FROM payments WHERE merchant_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
-            )
-            .bind(merchant_id)
-            .bind(limit)
-            .fetch_all(pool)
-            .await?
-        }
-
-        (None, Some((ts, cid))) => {
-            sqlx::query(
-                "SELECT id, merchant_id, destination_address, memo, amount, asset, asset_issuer, status,
-                    webhook_url, tx_hash, paid_amount, created_at, updated_at, expires_at
-             FROM payments
-             WHERE merchant_id = ? AND (created_at < ? OR (created_at = ? AND id < ?))
-             ORDER BY created_at DESC, id DESC LIMIT ?",
-            )
-            .bind(merchant_id)
-            .bind(ts)
-            .bind(ts)
-            .bind(cid)
-            .bind(limit)
-            .fetch_all(pool)
-            .await?
-        }
-
-        (Some(s), None) => {
-            sqlx::query(
-                "SELECT id, merchant_id, destination_address, memo, amount, asset, asset_issuer, status,
-                    webhook_url, tx_hash, paid_amount, created_at, updated_at, expires_at
-             FROM payments WHERE merchant_id = ? AND status = ? ORDER BY created_at DESC, id DESC LIMIT ?",
-            )
-            .bind(merchant_id)
-            .bind(s)
-            .bind(limit)
-            .fetch_all(pool)
-            .await?
-        }
-
-        (Some(s), Some((ts, cid))) => {
-            sqlx::query(
-                "SELECT id, merchant_id, destination_address, memo, amount, asset, asset_issuer, status,
-                    webhook_url, tx_hash, paid_amount, created_at, updated_at, expires_at
-             FROM payments
-             WHERE merchant_id = ? AND status = ? AND (created_at < ? OR (created_at = ? AND id < ?))
-             ORDER BY created_at DESC, id DESC LIMIT ?",
-            )
-            .bind(merchant_id)
-            .bind(s)
-            .bind(ts)
-            .bind(ts)
-            .bind(cid)
-            .bind(limit)
-            .fetch_all(pool)
-            .await?
-        }
-    };
+    let (cursor_ts, cursor_id) = cursor.unwrap_or(("9999-12-31T23:59:59Z", ""));
+    let rows = sqlx::query(
+        "SELECT id, merchant_id, destination_address, memo, amount, asset, asset_issuer, status,
+                webhook_url, tx_hash, paid_amount, created_at, updated_at, expires_at
+         FROM payments
+         WHERE merchant_id = ?
+           AND (? IS NULL OR status = ?)
+           AND (? IS NULL OR created_at >= ?)
+           AND (? IS NULL OR created_at <= ?)
+           AND (? = '' OR created_at < ? OR (created_at = ? AND id < ?))
+         ORDER BY created_at DESC, id DESC LIMIT ?",
+    )
+    .bind(merchant_id)
+    .bind(status)
+    .bind(status)
+    .bind(created_after)
+    .bind(created_after)
+    .bind(created_before)
+    .bind(created_before)
+    .bind(cursor_id)
+    .bind(cursor_ts)
+    .bind(cursor_ts)
+    .bind(cursor_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
 
     Ok(rows.iter().map(row_to_payment).collect())
+}
+
+pub async fn payments_summary(pool: &Db, merchant_id: &str) -> Result<Vec<(String, i64)>> {
+    let rows = sqlx::query_as::<_, (String, i64)>(
+        "SELECT status, COUNT(*) FROM payments WHERE merchant_id = ? GROUP BY status ORDER BY status",
+    )
+    .bind(merchant_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows)
 }
 
 /// All payments still awaiting confirmation or top-up, oldest first. Rows whose
@@ -1396,7 +1373,7 @@ const KEY_PREFIX_LEN: usize = 12;
 ///
 /// Returns `(raw_key, prefix)`. The raw key is shown once and never stored.
 pub fn generate_api_key() -> (String, String) {
-    use rand::RngCore;
+    use rand::Rng;
     let mut bytes = [0u8; 32];
     rand::rng().fill_bytes(&mut bytes);
     let raw = format!("sg_{}", hex::encode(bytes));
@@ -1674,6 +1651,21 @@ mod tests {
         assert!(keys[0].revoked_at.is_none());
     }
 
+    /// Pins the key format across `rand` upgrades: `sg_` + 64 lowercase hex
+    /// chars (256 bits), with a `KEY_PREFIX_LEN`-char display prefix.
+    #[test]
+    fn generated_api_key_has_stable_length_and_alphabet() {
+        let (raw, prefix) = generate_api_key();
+        let body = raw.strip_prefix("sg_").expect("key starts with sg_");
+        assert_eq!(body.len(), 64);
+        assert!(body
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)));
+        assert_eq!(prefix.len(), KEY_PREFIX_LEN);
+        assert!(raw.starts_with(&prefix));
+        assert_ne!(raw, generate_api_key().0);
+    }
+
     /// Revoking a key must take effect immediately for authentication.
     ///
     /// A second key is issued first so the guard against revoking a
@@ -1790,10 +1782,12 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(find_pending_by_memo(&pool, "MEMOX")
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            find_pending_by_memo(&pool, "MEMOX")
+                .await
+                .unwrap()
+                .is_none()
+        );
 
         let expired = expire_overdue(&pool).await.unwrap();
         assert_eq!(expired.len(), 1);
@@ -1893,34 +1887,44 @@ mod tests {
             .unwrap();
 
         // First time a transaction is seen it is recorded and counted.
-        assert!(record_processed_tx(&pool, "p", "TX_A", 0, 40_000_000)
-            .await
-            .unwrap());
+        assert!(
+            record_processed_tx(&pool, "p", "TX_A", 0, 40_000_000)
+                .await
+                .unwrap()
+        );
         assert_eq!(sum_processed_stroops(&pool, "p").await.unwrap(), 40_000_000);
 
         // Re-seeing the same transaction + operation index is a no-op — no double credit.
-        assert!(!record_processed_tx(&pool, "p", "TX_A", 0, 40_000_000)
-            .await
-            .unwrap());
+        assert!(
+            !record_processed_tx(&pool, "p", "TX_A", 0, 40_000_000)
+                .await
+                .unwrap()
+        );
         assert_eq!(sum_processed_stroops(&pool, "p").await.unwrap(), 40_000_000);
 
         // A distinct transaction adds to the running total.
-        assert!(record_processed_tx(&pool, "p", "TX_B", 0, 30_000_000)
-            .await
-            .unwrap());
+        assert!(
+            record_processed_tx(&pool, "p", "TX_B", 0, 30_000_000)
+                .await
+                .unwrap()
+        );
         assert_eq!(sum_processed_stroops(&pool, "p").await.unwrap(), 70_000_000);
 
         // Re-seeing an *earlier* transaction after a later one is still a no-op,
         // regardless of order (issue #119).
-        assert!(!record_processed_tx(&pool, "p", "TX_A", 0, 40_000_000)
-            .await
-            .unwrap());
+        assert!(
+            !record_processed_tx(&pool, "p", "TX_A", 0, 40_000_000)
+                .await
+                .unwrap()
+        );
         assert_eq!(sum_processed_stroops(&pool, "p").await.unwrap(), 70_000_000);
 
         // A second operation within TX_A (different operation_index) IS a new credit (issue #613).
-        assert!(record_processed_tx(&pool, "p", "TX_A", 1, 20_000_000)
-            .await
-            .unwrap());
+        assert!(
+            record_processed_tx(&pool, "p", "TX_A", 1, 20_000_000)
+                .await
+                .unwrap()
+        );
         assert_eq!(sum_processed_stroops(&pool, "p").await.unwrap(), 90_000_000);
 
         // Rows are scoped per intent.
@@ -1966,10 +1970,12 @@ mod tests {
             .unwrap();
 
         // Freshly inserted, so a large grace window makes it ineligible...
-        assert!(list_redrivable_deliveries(&pool, 8, 3600, 0, 0)
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            list_redrivable_deliveries(&pool, 8, 3600, 0, 0)
+                .await
+                .unwrap()
+                .is_empty()
+        );
         // ...while a zero grace window makes it immediately eligible.
         assert_eq!(
             list_redrivable_deliveries(&pool, 8, 0, 0, 0)

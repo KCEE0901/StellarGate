@@ -10,6 +10,8 @@
  * be a stored-XSS vector.
  */
 
+import { fmtTime, shortId } from "/dashboard/format.js";
+
 (function () {
   "use strict";
 
@@ -20,6 +22,8 @@
   var state = {
     key: null,
     status: "",
+    createdAfter: "",
+    createdBefore: "",
     cursor: null,
     loading: false,
   };
@@ -57,40 +61,6 @@
   }
 
   // ── Formatting ────────────────────────────────────────────────────────
-
-  function fmtTime(iso) {
-    if (!iso) return "—";
-    var d = new Date(iso);
-    return isNaN(d.getTime()) ? iso : d.toLocaleString();
-  }
-
-  function relativeTime(iso) {
-    if (!iso) return "never";
-    var d = new Date(iso);
-    var seconds = Math.round((Date.now() - d.getTime()) / 1000);
-    if (!isFinite(seconds)) return iso;
-    if (seconds < 60) return seconds + "s ago";
-    if (seconds < 3600) return Math.round(seconds / 60) + "m ago";
-    if (seconds < 86400) return Math.round(seconds / 3600) + "h ago";
-    return Math.round(seconds / 86400) + "d ago";
-  }
-
-  function shortId(id) {
-    return typeof id === "string" && id.length > 12 ? id.slice(0, 8) + "…" : id;
-  }
-
-  function copyButton(value) {
-    var button = el("button", "copy", "Copy");
-    button.addEventListener("click", function () {
-      navigator.clipboard.writeText(value).then(function () {
-        button.textContent = "Copied";
-        window.setTimeout(function () {
-          button.textContent = "Copy";
-        }, 1200);
-      });
-    });
-    return button;
-  }
 
   /** Map a payment or delivery status onto a pill style. */
   function pillClass(status) {
@@ -198,6 +168,7 @@
 
   function signIn(key, persist) {
     state.key = key;
+    readHashState();
     // Validate by making the cheapest authenticated call available.
     return api("/payments?limit=1").then(function () {
       if (persist !== null) storeKey(key, persist);
@@ -206,6 +177,7 @@
       setError($("gate-error"), null);
       loadVersion();
       pollHealth();
+      loadSummary();
       reload();
     });
   }
@@ -225,6 +197,8 @@
 
     var query = "/payments?limit=" + PAGE_SIZE;
     if (state.status) query += "&status=" + encodeURIComponent(state.status);
+    if (state.createdAfter) query += "&created_after=" + encodeURIComponent(state.createdAfter + "T00:00:00Z");
+    if (state.createdBefore) query += "&created_before=" + encodeURIComponent(state.createdBefore + "T23:59:59Z");
     if (state.cursor) query += "&cursor=" + encodeURIComponent(state.cursor);
 
     api(query)
@@ -247,6 +221,23 @@
       });
   }
 
+  function loadSummary() {
+    api("/payments/summary")
+      .then(function (body) {
+        var summary = $("summary");
+        clear(summary);
+        (body.summary || []).forEach(function (row) {
+          var card = el("div", "summary-card");
+          card.appendChild(el("span", "muted small", row[0]));
+          card.appendChild(el("strong", null, row[1]));
+          summary.appendChild(card);
+        });
+      })
+      .catch(function () {
+        clear($("summary"));
+      });
+  }
+
   function appendRow(p) {
     var tr = document.createElement("tr");
     tr.tabIndex = 0;
@@ -255,7 +246,7 @@
     statusCell.appendChild(el("span", pillClass(p.status), p.status));
     tr.appendChild(statusCell);
 
-    tr.appendChild(el("td", null, p.amount + " " + p.asset));
+    tr.appendChild(el("td", null, formatAmount(p.amount, p.asset)));
     tr.appendChild(el("td", "mono", p.memo));
     tr.appendChild(el("td", null, fmtTime(p.created_at)));
     tr.appendChild(el("td", "mono", shortId(p.id)));
@@ -289,8 +280,8 @@
       .then(function (p) {
         [
           ["Status", p.status],
-          ["Amount", p.amount + " " + p.asset],
-          ["Received", p.paid_amount ? p.paid_amount + " " + p.asset : "—"],
+          ["Amount", formatAmount(p.amount, p.asset)],
+          ["Received", p.paid_amount ? formatAmount(p.paid_amount, p.asset) : "—"],
           ["Memo", p.memo],
           ["Destination", p.destination_address],
           ["Transaction", p.tx_hash || "—"],
@@ -305,11 +296,14 @@
             var dd = document.createElement("dd");
             dd.appendChild(el("span", pillClass(p.status), p.status));
             fields.appendChild(dd);
-          } else if (pair[0] === "Memo" || pair[0] === "Destination" || pair[0] === "Payment ID") {
-            var value = document.createElement("dd");
-            value.appendChild(el("span", "mono", pair[1]));
-            value.appendChild(copyButton(pair[1]));
-            fields.appendChild(value);
+          } else if (pair[0] === "Transaction" && p.tx_hash) {
+            var tx = document.createElement("dd");
+            var link = el("a", "mono", shortId(p.tx_hash));
+            link.href = explorerTx(p.tx_hash);
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            tx.appendChild(link);
+            fields.appendChild(tx);
           } else {
             fields.appendChild(el("dd", "mono", pair[1]));
           }
@@ -442,6 +436,13 @@
 
   // ── Wiring ────────────────────────────────────────────────────────────
 
+  function syncFilterUi() {
+    Array.prototype.forEach.call(document.querySelectorAll(".chip"), function (chip) {
+      chip.className = (chip.getAttribute("data-status") || "") === state.status ? "chip chip-on" : "chip";
+    });
+    $("auto-refresh").checked = state.autoRefresh;
+  }
+
   function init() {
     $("gate-form").addEventListener("submit", function (ev) {
       ev.preventDefault();
@@ -458,9 +459,21 @@
     });
 
     $("refresh").addEventListener("click", reload);
+    $("created-after").addEventListener("change", function () {
+      state.createdAfter = $("created-after").value;
+      reload();
+    });
+    $("created-before").addEventListener("change", function () {
+      state.createdBefore = $("created-before").value;
+      reload();
+    });
     $("load-more").addEventListener("click", loadPayments);
     $("detail-close").addEventListener("click", closeDetail);
     $("scrim").addEventListener("click", closeDetail);
+    $("auto-refresh").addEventListener("change", function () {
+      state.autoRefresh = $("auto-refresh").checked;
+      writeHashState();
+    });
 
     document.addEventListener("keydown", function (ev) {
       if (ev.key === "Escape") closeDetail();
@@ -478,6 +491,7 @@
           );
           chip.className = "chip chip-on";
           state.status = chip.getAttribute("data-status") || "";
+          writeHashState();
           reload();
         });
       }
@@ -486,6 +500,11 @@
     window.setInterval(function () {
       if (state.key) pollHealth();
     }, 30000);
+    window.setInterval(function () {
+      if (state.key && state.autoRefresh && (!state.status || state.status === "pending")) {
+        reload();
+      }
+    }, 15000);
 
     // Resume an existing session when a key is already stored.
     /* Resume an existing session when a key is already stored. The gate is

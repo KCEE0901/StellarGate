@@ -38,14 +38,14 @@ use std::sync::Arc;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::str::FromStr;
 use stellargate::{
+    AppState,
     config::{AcceptedAsset, Config, ListenerMode},
     db::{self, NewPayment},
-    horizon::{reconcile_payment, HorizonPayment, TransactionRef},
-    AppState,
+    horizon::{HorizonPayment, TransactionRef, reconcile_payment},
 };
 use wiremock::{
-    matchers::{method, path},
     Mock, MockServer, ResponseTemplate,
+    matchers::{method, path},
 };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -69,7 +69,7 @@ async fn memory_pool() -> db::Db {
 }
 
 /// Build an [`AppState`] wired to `pool`, pointing webhooks at `webhook_url`.
-fn make_state(pool: db::Db, webhook_url: Option<String>) -> Arc<AppState> {
+fn make_state(pool: db::Db, _webhook_url: Option<String>) -> Arc<AppState> {
     let accepted_assets = vec![AcceptedAsset {
         code: "XLM".into(),
         issuer: None,
@@ -251,9 +251,7 @@ async fn multi_op_same_tx_credits_full_amount() {
     );
 
     // Both operations must be in the processed_transactions ledger.
-    let total = db::sum_processed_stroops(&pool, &payment_id)
-        .await
-        .unwrap();
+    let total = db::sum_processed_stroops(&pool, &payment_id).await.unwrap();
     assert_eq!(
         total,
         100_000_000, // 10 XLM in stroops
@@ -290,7 +288,10 @@ async fn multi_op_idempotent_on_rescan() {
     assert_eq!(payment.status, "completed");
 
     let after_first_pass = mock_server.received_requests().await.unwrap().len();
-    assert_eq!(after_first_pass, 1, "should have exactly one webhook after first pass");
+    assert_eq!(
+        after_first_pass, 1,
+        "should have exactly one webhook after first pass"
+    );
 
     // Second pass: rescan with the same operations.
     reconcile_payment(&state, &op0).await.unwrap();
@@ -381,5 +382,9 @@ async fn single_op_tx_still_works() {
 
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     let received = mock_server.received_requests().await.unwrap();
-    assert_eq!(received.len(), 1, "exactly one webhook must fire for a single-op tx");
+    assert_eq!(
+        received.len(),
+        1,
+        "exactly one webhook must fire for a single-op tx"
+    );
 }

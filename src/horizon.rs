@@ -53,12 +53,12 @@
 //! The matching logic in [`verify`] is pure and unit-tested; the networked
 //! functions wrap it with I/O.
 
-use crate::{db, money, webhook, AppState};
+use crate::{AppState, db, money, webhook};
 use futures_util::StreamExt;
 use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tokio::sync::watch;
 use tracing::{debug, info, warn};
 
@@ -514,7 +514,14 @@ pub async fn fetch_recent_payments(
     cursor: &str,
     limit: u32,
 ) -> anyhow::Result<Vec<HorizonPayment>> {
-    let url = payments_url(horizon_url, account, Some("asc"), Some(cursor), Some(limit), true)?;
+    let url = payments_url(
+        horizon_url,
+        account,
+        Some("asc"),
+        Some(cursor),
+        Some(limit),
+        true,
+    )?;
     let resp = client
         .get(url)
         .header("Accept", "application/json")
@@ -712,14 +719,13 @@ pub async fn check_trustlines(state: &Arc<AppState>) -> anyhow::Result<Vec<Strin
         .balances
         .iter()
         .find(|b| b.asset_type.as_deref() == Some("native"))
+        && let Some(amt) = &native_balance.balance
     {
-        if let Some(amt) = &native_balance.balance {
-            info!(
-                balance = %amt,
-                account = %state.config.gateway_public,
-                "gateway account native XLM balance"
-            );
-        }
+        info!(
+            balance = %amt,
+            account = %state.config.gateway_public,
+            "gateway account native XLM balance"
+        );
     }
 
     // Collect assets that are missing a trustline entirely OR have one but are
@@ -1243,7 +1249,15 @@ async fn reconcile_post_terminal_payment(
     handled; skip. operation_index distinguishes multiple ops within one
     transaction so each fires its own unexpected-payment webhook (issue #613). */
     let op_index = hp.operation_index();
-    if !db::record_processed_tx(&state.pool, &payment.id, hp_hash, op_index, matched.new_stroops).await? {
+    if !db::record_processed_tx(
+        &state.pool,
+        &payment.id,
+        hp_hash,
+        op_index,
+        matched.new_stroops,
+    )
+    .await?
+    {
         return Ok(());
     }
 
@@ -1642,13 +1656,13 @@ async fn handle_stream_event(state: &Arc<AppState>, block: &str, cursor: &mut St
     with the poller's cursor. A write failure is logged and tolerated: the
     in-memory cursor still covers reconnects within this process, and the
     poller remains the backstop across restarts. */
-    if let Some(id) = ev.id {
-        if id != *cursor {
-            if let Err(e) = db::set_state(&state.pool, STREAM_CURSOR_KEY, &id).await {
-                warn!(error = %e, "failed to persist stream cursor");
-            }
-            *cursor = id;
+    if let Some(id) = ev.id
+        && id != *cursor
+    {
+        if let Err(e) = db::set_state(&state.pool, STREAM_CURSOR_KEY, &id).await {
+            warn!(error = %e, "failed to persist stream cursor");
         }
+        *cursor = id;
     }
 
     if ev.event.as_deref() == Some("open") || ev.data.is_empty() {

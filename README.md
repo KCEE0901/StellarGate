@@ -126,7 +126,7 @@ tests/             Integration tests (API, concurrency, rate limits, webhooks, t
 
 | Layer | Choice |
 |---|---|
-| Language | Rust (2021 edition, 1.94+) |
+| Language | Rust (2024 edition, 1.94+) |
 | HTTP | [axum](https://github.com/tokio-rs/axum) + [tower-http](https://github.com/tower-rs/tower-http) |
 | Database | SQLite via [sqlx](https://github.com/launchbadge/sqlx) (WAL mode) |
 | Async runtime | [tokio](https://tokio.rs) |
@@ -206,8 +206,10 @@ deploy. Sign in with any merchant API key.
 JavaScript, compiled into the binary with `include_str!`. There is no npm, no
 bundler, and no `node_modules`: the deployable artifact stays a single Rust
 binary, and the dashboard cannot drift out of sync with the API it ships
-alongside. It is also a plain client of the documented REST API — it uses no
-private endpoints, so anything it displays you can fetch yourself.
+alongside. CI still runs `node --check static/dashboard.js` and a small static
+accessibility smoke check so dashboard changes get fast feedback without adding
+a frontend toolchain. It is also a plain client of the documented REST API —
+it uses no private endpoints, so anything it displays you can fetch yourself.
 
 **Security.**
 

@@ -8,7 +8,7 @@
 //! our check and the actual connect — a DNS-rebinding attack — can't slip a
 //! blocked address past us: the pinned client never re-resolves the host.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
@@ -310,10 +310,13 @@ mod tests {
 
     #[tokio::test]
     async fn validate_rejects_url_with_no_host() {
+        // The WHATWG parser reads `http:///path` as host `path`, so it is
+        // rejected at resolution rather than by the "no host" guard.
         let err = validate("http:///path", false).await.unwrap_err();
+        let msg = err.to_string().to_lowercase();
         assert!(
-            err.to_string().to_lowercase().contains("no host"),
-            "expected 'no host' error, got: {err}"
+            msg.contains("no host") || msg.contains("resolve"),
+            "expected a host rejection, got: {err}"
         );
     }
 

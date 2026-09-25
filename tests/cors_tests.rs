@@ -28,9 +28,9 @@ use std::collections::BTreeSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use stellargate::{
-    api,
+    AppState, api,
     config::{Config, ListenerMode},
-    db, AppState,
+    db,
 };
 
 /// An origin in the strict allow-list. A preflight from this origin is answered;
