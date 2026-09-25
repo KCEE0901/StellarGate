@@ -185,7 +185,10 @@ async fn api_keys_are_stored_hashed_not_plaintext() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_ne!(merchant_hash, raw_key, "merchants.api_key_hash must not store the raw key");
+    assert_ne!(
+        merchant_hash, raw_key,
+        "merchants.api_key_hash must not store the raw key"
+    );
     assert_eq!(merchant_hash, expected_digest);
 
     let key_hash: String =
@@ -193,7 +196,10 @@ async fn api_keys_are_stored_hashed_not_plaintext() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_ne!(key_hash, raw_key, "api_keys.key_hash must not store the raw key");
+    assert_ne!(
+        key_hash, raw_key,
+        "api_keys.key_hash must not store the raw key"
+    );
     assert_eq!(key_hash, expected_digest);
 }
 

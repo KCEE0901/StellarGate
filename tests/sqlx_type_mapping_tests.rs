@@ -14,8 +14,8 @@
 //! `db.rs` so a future sqlx bump that does change one fails here, by name,
 //! rather than in whichever integration test happens to reach that query.
 
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::Row;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::str::FromStr;
 use stellargate::db;
 
@@ -51,9 +51,11 @@ async fn count_star_decodes_as_i64() {
     assert_eq!(has_column, 1);
 
     assert!(!db::memo_exists(&pool, "no-such-memo").await.unwrap());
-    assert!(!db::merchant_exists(&pool, "no-such-merchant")
-        .await
-        .unwrap());
+    assert!(
+        !db::merchant_exists(&pool, "no-such-merchant")
+            .await
+            .unwrap()
+    );
     assert_eq!(db::count_active_api_keys(&pool, "m1").await.unwrap(), 0);
 }
 

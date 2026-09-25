@@ -72,8 +72,16 @@
             <button class="chip" data-status="underpaid">Underpaid</button>
             <button class="chip" data-status="expired">Expired</button>
           </div>
+          <div class="filters" role="group" aria-label="Filter by creation date">
+            <label class="small" for="created-after">From</label>
+            <input id="created-after" type="date" />
+            <label class="small" for="created-before">To</label>
+            <input id="created-before" type="date" />
+          </div>
           <button id="refresh" class="ghost">Refresh</button>
         </section>
+
+        <section id="summary" class="summary" aria-label="Payment summary"></section>
 
         <section class="card">
           <table class="payments">
@@ -114,6 +122,6 @@
       <div id="scrim" class="scrim" hidden></div>
     </div>
 
-    <script src="/dashboard/app.js"></script>
+    <script type="module" src="/dashboard/app.js"></script>
   </body>
 </html>

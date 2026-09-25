@@ -1,13 +1,13 @@
 use axum::http::StatusCode;
 use axum_test::TestServer;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::str::FromStr;
 use std::sync::Arc;
 use stellargate::{
-    api,
+    AppState, api,
     config::{Config, ListenerMode},
-    db, AppState,
+    db,
 };
 use time::format_description::well_known::Rfc3339;
 
@@ -651,10 +651,12 @@ async fn test_webhook_url_http_rejected_on_public_network() {
     res.assert_status(StatusCode::BAD_REQUEST);
     let body: Value = res.json();
     assert_eq!(body["code"], "invalid_webhook_url");
-    assert!(body["error"]
-        .as_str()
-        .unwrap()
-        .contains("must be an HTTPS URL on public network"));
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .contains("must be an HTTPS URL on public network")
+    );
 }
 
 #[tokio::test]

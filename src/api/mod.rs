@@ -1,18 +1,18 @@
 use crate::api::payments::{AppError, JsonBody};
-use crate::{db, AppState};
+use crate::{AppState, db};
 use axum::{
+    Json,
     extract::{ConnectInfo, Extension, Path, Request, State},
     http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode},
     middleware::{self, Next},
     response::IntoResponse,
     routing::{get, post},
-    Json,
 };
 use governor::clock::{Clock, DefaultClock};
 use governor::middleware::StateInformationMiddleware;
 use ipnet::IpNet;
 use moka::sync::Cache;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -203,6 +203,7 @@ pub fn router(state: Arc<AppState>) -> axum::Router {
         .route("/dashboard", get(dashboard_html))
         .route("/dashboard/app.css", get(dashboard_css))
         .route("/dashboard/app.js", get(dashboard_js))
+        .route("/dashboard/format.js", get(dashboard_format_js))
         /* The versioned API surface, mounted twice.
         `/v1` is canonical. The same routes stay mounted unprefixed so every
         existing integrator keeps working — shipping versioning by breaking all
@@ -334,6 +335,7 @@ fn api_v1(
         axum::Router::new()
             .merge(payments_authed)
             .merge(redeliver)
+            .route("/summary", get(payments::summary))
             .route("/{id}", get(payments::get_by_id)),
     )
 }
@@ -609,13 +611,13 @@ async fn issue_api_key(
     }
 
     let label = body.and_then(|JsonBody(b)| b.label);
-    if let Some(l) = &label {
-        if l.len() > 100 {
-            return Err(AppError::bad_request(
-                "invalid_label",
-                "label exceeds max length of 100 characters",
-            ));
-        }
+    if let Some(l) = &label
+        && l.len() > 100
+    {
+        return Err(AppError::bad_request(
+            "invalid_label",
+            "label exceeds max length of 100 characters",
+        ));
     }
 
     let (raw_key, prefix) = db::generate_api_key();
@@ -825,10 +827,12 @@ pub(crate) fn retry_after_secs(wait: Duration) -> u64 {
 /// - `quota`     — the bucket's replenishment policy.
 /// - `remaining` — cells currently available (0 = drained).
 /// - `next_wait` — time until the next single cell is available (from governor's
-///                 `not_until.wait_time_from(...)`).
+///   `not_until.wait_time_from(...)`).
 ///
 /// Formula: `max(cells_missing × period_per_cell, next_wait)`, rounded up.
 /// Returns 0 when the bucket is already full (`remaining == burst`).
+// Only exercised by unit tests until the `X-RateLimit-Reset` header is wired up.
+#[allow(dead_code)]
 pub(crate) fn reset_secs(quota: governor::Quota, remaining: u32, next_wait: Duration) -> u64 {
     let missing = quota.burst_size().get().saturating_sub(remaining);
     let refill = quota.replenish_interval().saturating_mul(missing);
@@ -1004,12 +1008,11 @@ pub(crate) fn client_ip_key_from_parts(
 
     // No X-Forwarded-For, or every hop was a trusted proxy: fall back to the
     // single-value X-Real-IP header, also gated on the trusted peer.
-    if let Some(value) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
-        if let Ok(ip) = value.trim().parse::<IpAddr>() {
-            if !trusted_proxies.iter().any(|net| net.contains(&ip)) {
-                return ip.to_string();
-            }
-        }
+    if let Some(value) = headers.get("x-real-ip").and_then(|v| v.to_str().ok())
+        && let Ok(ip) = value.trim().parse::<IpAddr>()
+        && !trusted_proxies.iter().any(|net| net.contains(&ip))
+    {
+        return ip.to_string();
     }
 
     peer_ip.to_string()
@@ -1153,14 +1156,14 @@ async fn ready(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     }
 
     // 2. Horizon must respond (only when a gateway wallet is configured).
-    if state.config.gateway_configured() {
-        if let Err(reason) = check_horizon_ready(&state).await {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({ "status": "unavailable", "reason": reason })),
-            )
-                .into_response();
-        }
+    if state.config.gateway_configured()
+        && let Err(reason) = check_horizon_ready(&state).await
+    {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "status": "unavailable", "reason": reason })),
+        )
+            .into_response();
     }
 
     (StatusCode::OK, Json(json!({ "status": "ok" }))).into_response()
@@ -1224,6 +1227,7 @@ for the two to drift apart. */
 const DASHBOARD_HTML: &str = include_str!("../../static/dashboard.html");
 const DASHBOARD_CSS: &str = include_str!("../../static/dashboard.css");
 const DASHBOARD_JS: &str = include_str!("../../static/dashboard.js");
+const DASHBOARD_FORMAT_JS: &str = include_str!("../../static/dashboard-format.js");
 
 /// Locks the dashboard to its own origin: no third-party script, style, frame
 /// or connection. The page ships no inline script or style, so this needs no
@@ -1265,6 +1269,10 @@ async fn dashboard_css() -> impl IntoResponse {
 
 async fn dashboard_js() -> impl IntoResponse {
     dashboard_asset(DASHBOARD_JS, "text/javascript; charset=utf-8")
+}
+
+async fn dashboard_format_js() -> impl IntoResponse {
+    dashboard_asset(DASHBOARD_FORMAT_JS, "text/javascript; charset=utf-8")
 }
 
 async fn not_found() -> impl IntoResponse {
@@ -1670,11 +1678,13 @@ mod tests {
 
         let public_ok = public.get("/health").await;
         public_ok.assert_status_ok();
-        assert!(public_ok
-            .header("strict-transport-security")
-            .to_str()
-            .unwrap_or("")
-            .contains("max-age="));
+        assert!(
+            public_ok
+                .header("strict-transport-security")
+                .to_str()
+                .unwrap_or("")
+                .contains("max-age=")
+        );
 
         let testnet_ok = testnet.get("/health").await;
         testnet_ok.assert_status_ok();

@@ -28,14 +28,14 @@ use std::sync::Arc;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::str::FromStr;
 use stellargate::{
+    AppState,
     config::{AcceptedAsset, Config, ListenerMode},
     db::{self, NewPayment},
-    horizon::{reconcile_payment, HorizonPayment, TransactionRef},
-    AppState,
+    horizon::{HorizonPayment, TransactionRef, reconcile_payment},
 };
 use wiremock::{
-    matchers::{method, path},
     Mock, MockServer, ResponseTemplate,
+    matchers::{method, path},
 };
 
 // ── helpers ──────────────────────────────────────────────────────────────────
