@@ -168,6 +168,7 @@ import { fmtTime, shortId } from "/dashboard/format.js";
 
   function signIn(key, persist) {
     state.key = key;
+    readHashState();
     // Validate by making the cheapest authenticated call available.
     return api("/payments?limit=1").then(function () {
       if (persist !== null) storeKey(key, persist);
@@ -245,7 +246,7 @@ import { fmtTime, shortId } from "/dashboard/format.js";
     statusCell.appendChild(el("span", pillClass(p.status), p.status));
     tr.appendChild(statusCell);
 
-    tr.appendChild(el("td", null, p.amount + " " + p.asset));
+    tr.appendChild(el("td", null, formatAmount(p.amount, p.asset)));
     tr.appendChild(el("td", "mono", p.memo));
     tr.appendChild(el("td", null, fmtTime(p.created_at)));
     tr.appendChild(el("td", "mono", shortId(p.id)));
@@ -279,8 +280,8 @@ import { fmtTime, shortId } from "/dashboard/format.js";
       .then(function (p) {
         [
           ["Status", p.status],
-          ["Amount", p.amount + " " + p.asset],
-          ["Received", p.paid_amount ? p.paid_amount + " " + p.asset : "—"],
+          ["Amount", formatAmount(p.amount, p.asset)],
+          ["Received", p.paid_amount ? formatAmount(p.paid_amount, p.asset) : "—"],
           ["Memo", p.memo],
           ["Destination", p.destination_address],
           ["Transaction", p.tx_hash || "—"],
@@ -295,6 +296,14 @@ import { fmtTime, shortId } from "/dashboard/format.js";
             var dd = document.createElement("dd");
             dd.appendChild(el("span", pillClass(p.status), p.status));
             fields.appendChild(dd);
+          } else if (pair[0] === "Transaction" && p.tx_hash) {
+            var tx = document.createElement("dd");
+            var link = el("a", "mono", shortId(p.tx_hash));
+            link.href = explorerTx(p.tx_hash);
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            tx.appendChild(link);
+            fields.appendChild(tx);
           } else {
             fields.appendChild(el("dd", "mono", pair[1]));
           }
@@ -417,6 +426,13 @@ import { fmtTime, shortId } from "/dashboard/format.js";
 
   // ── Wiring ────────────────────────────────────────────────────────────
 
+  function syncFilterUi() {
+    Array.prototype.forEach.call(document.querySelectorAll(".chip"), function (chip) {
+      chip.className = (chip.getAttribute("data-status") || "") === state.status ? "chip chip-on" : "chip";
+    });
+    $("auto-refresh").checked = state.autoRefresh;
+  }
+
   function init() {
     $("gate-form").addEventListener("submit", function (ev) {
       ev.preventDefault();
@@ -444,6 +460,10 @@ import { fmtTime, shortId } from "/dashboard/format.js";
     $("load-more").addEventListener("click", loadPayments);
     $("detail-close").addEventListener("click", closeDetail);
     $("scrim").addEventListener("click", closeDetail);
+    $("auto-refresh").addEventListener("change", function () {
+      state.autoRefresh = $("auto-refresh").checked;
+      writeHashState();
+    });
 
     document.addEventListener("keydown", function (ev) {
       if (ev.key === "Escape") closeDetail();
@@ -461,6 +481,7 @@ import { fmtTime, shortId } from "/dashboard/format.js";
           );
           chip.className = "chip chip-on";
           state.status = chip.getAttribute("data-status") || "";
+          writeHashState();
           reload();
         });
       }
@@ -469,6 +490,11 @@ import { fmtTime, shortId } from "/dashboard/format.js";
     window.setInterval(function () {
       if (state.key) pollHealth();
     }, 30000);
+    window.setInterval(function () {
+      if (state.key && state.autoRefresh && (!state.status || state.status === "pending")) {
+        reload();
+      }
+    }, 15000);
 
     // Resume an existing session when a key is already stored.
     /* Resume an existing session when a key is already stored. The gate is
